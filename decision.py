@@ -4,92 +4,103 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from sklearn import tree
 import plotly.express as px
-import plotly.graph_objects as go
 
 st.set_page_config(page_title="💼 Salary Predictor", layout="wide", page_icon="💰")
-st.markdown("## 💼 Salary >100k Predictor (Decision Tree) ✨")
+st.markdown("## 💼 Salary >100k Predictor ✨")
 
-# File Uploader
+# File Uploader with persistence
+if 'df' not in st.session_state:
+    st.session_state.df = None
+
 uploaded_file = st.file_uploader("📁 Upload salaries.csv", type="csv")
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.session_state.df = df
-    st.success("✅ File uploaded!")
-else:
-    st.info("👆 Upload your salaries.csv to start")
+    try:
+        df = pd.read_csv(uploaded_file)
+        st.session_state.df = df
+        st.success(f"✅ Uploaded! Shape: {df.shape} | Columns: {list(df.columns)}")
+        st.write("Preview:")
+        st.dataframe(df.head())
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
+
+if st.session_state.df is None:
+    st.warning("👆 Please upload CSV first")
     st.stop()
 
-df = st.session_state.df
-st.dataframe(df.head(10), use_container_width=True)
+df = st.session_state.df.copy()
 
-# Sidebar Metrics
-st.sidebar.header("📊 Quick Stats")
-st.sidebar.metric("Total Records", len(df))
-st.sidebar.metric("High Salary %", f"{df['salarymorethen100k'].mean()*100:.1f}%")
+# Auto-detect target column
+salary_cols = [col for col in df.columns if 'salary' in col.lower()]
+if not salary_cols:
+    st.error("❌ No salary column found!")
+    st.stop()
+target_col = salary_cols[0]
+st.info(f"📊 Using target: **{target_col}**")
+
+# Sidebar Stats
+st.sidebar.header("📈 Stats")
+st.sidebar.metric("Records", len(df))
+st.sidebar.metric("High Salary %", f"{df[target_col].mean()*100:.1f}%")
 
 # Charts
 col1, col2 = st.columns(2)
 with col1:
-    fig1 = px.histogram(df, x='company', color='salarymorethen100k', title="Salary by Company")
+    fig1 = px.histogram(df, x='company', color=target_col, title="By Company")
     st.plotly_chart(fig1, use_container_width=True)
 with col2:
-    fig2 = px.bar(df.groupby(['job', 'degree'])['salarymorethen100k'].mean().reset_index(),
-                  x='job', y='salarymorethen100k', color='degree', title="Avg Salary by Job & Degree")
+    fig2 = px.bar(df.groupby(['job', 'degree'])[target_col].mean().reset_index(),
+                  x='job', y=target_col, color='degree', title="Avg by Job/Degree")
     st.plotly_chart(fig2, use_container_width=True)
 
-# Model Training (in expander)
-with st.expander("🔧 Train Model (Auto-runs)"):
-    inputs = df.drop('salarymorethen100k', axis=1)
-    target = df['salarymorethen100k']
+# Model Training
+@st.cache_data
+def train_model(_df):
+    inputs = _df.drop(target_col, axis=1)
+    target = _df[target_col]
     
-    le_company = LabelEncoder()
-    le_job = LabelEncoder()
-    le_degree = LabelEncoder()
+    encoders = {}
+    for col in ['company', 'job', 'degree']:
+        if col in inputs.columns:
+            le = LabelEncoder()
+            inputs[f'{col}n'] = le.fit_transform(inputs[col])
+            encoders[col] = le
     
-    inputs['companyn'] = le_company.fit_transform(inputs['company'])
-    inputs['jobn'] = le_job.fit_transform(inputs['job'])
-    inputs['degreen'] = le_degree.fit_transform(inputs['degree'])
-    
-    inputsn = inputs.drop(['company', 'job', 'degree'], axis=1)
+    inputsn = inputs.drop([col for col in ['company', 'job', 'degree'] if col in inputs.columns], axis=1)
     
     model = tree.DecisionTreeClassifier(random_state=42)
     model.fit(inputsn, target)
-    st.session_state.model = model
-    st.session_state.le_company = le_company
-    st.session_state.le_job = le_job
-    st.session_state.le_degree = le_degree
-    st.session_state.inputsn = inputsn
-    st.session_state.target = target
-    st.metric("✅ Accuracy", f"{model.score(inputsn, target):.3f}")
+    return model, encoders, inputsn, target
+
+if 'model' not in st.session_state:
+    with st.spinner("Training model..."):
+        st.session_state.model, st.session_state.encoders, st.session_state.inputsn, st.session_state.target = train_model(df)
 
 model = st.session_state.model
-le_company, le_job, le_degree = st.session_state.le_company, st.session_state.le_job, st.session_state.le_degree
+encoders = st.session_state.encoders
 
-# Prediction Section
-st.markdown("### 🎯 Predict Salary >100k")
+st.metric("✅ Accuracy", f"{model.score(st.session_state.inputsn, st.session_state.target):.3f}")
+
+# Prediction
+st.markdown("### 🎯 Predict")
 col1, col2, col3 = st.columns(3)
-company = col1.selectbox("🏢 Company", df['company'].unique(), help="Select company")
-job = col2.selectbox("💼 Job Role", df['job'].unique())
-degree = col3.selectbox("🎓 Degree", df['degree'].unique())
+company = col1.selectbox("🏢 Company", options=sorted(df['company'].unique()))
+job = col2.selectbox("💼 Job", options=sorted(df['job'].unique()))
+degree = col3.selectbox("🎓 Degree", options=sorted(df['degree'].unique()))
 
-if st.button("🔮 Predict Now", type="primary"):
-    test = np.array([[le_company.transform([company])[0],
-                      le_job.transform([job])[0],
-                      le_degree.transform([degree])[0]]])
+if st.button("🔮 Predict", type="primary", use_container_width=True):
+    test_features = {}
+    for col in ['company', 'job', 'degree']:
+        if col in encoders:
+            test_features[f'{col}n'] = encoders[col].transform([locals()[col]])[0]
+    
+    test = np.array([list(test_features.values())])
     pred = model.predict(test)[0]
     prob = model.predict_proba(test)[0][1]
     
-    st.markdown("### 📈 Result")
-    if pred == 1:
-        st.success(f"**Yes!** Expected >$100k (Probability: {prob:.1%}) 💰")
-    else:
-        st.error(f"**No.** Expected ≤$100k (Probability: {1-prob:.1%}) 📉")
-    
-    # History (simple)
-    if 'history' not in st.session_state:
-        st.session_state.history = []
-    st.session_state.history.append((company, job, degree, pred, prob))
-    st.dataframe(pd.DataFrame(st.session_state.history, 
-                              columns=['Company', 'Job', 'Degree', 'Pred', 'Prob>100k'])[-5:])
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.metric("Prediction", "Yes >100k 💰" if pred == 1 else "No ≤100k 📉")
+    with col_b:
+        st.metric("Probability", f"{prob:.1%}")
 
-st.caption("Built with Streamlit & Scikit-learn | Data from your CSV[file:1][file:2]")
+st.caption("🔧 Fixed for exact CSV columns[file:1][file:2]")
