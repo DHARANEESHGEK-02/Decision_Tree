@@ -5,59 +5,65 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.tree import DecisionTreeClassifier
 
 # -------------------------------------------------
-# Page config
+# Page Config
 # -------------------------------------------------
 st.set_page_config(page_title="Salary Prediction", layout="wide")
-
 st.title("💼 Salary Prediction using Decision Tree")
-st.write("Upload a CSV file and predict whether salary is greater than 100K")
 
 # -------------------------------------------------
-# File Upload
+# Upload CSV
 # -------------------------------------------------
-uploaded_file = st.file_uploader(
-    "📂 Upload Salary CSV file",
-    type=["csv"]
-)
+uploaded_file = st.file_uploader("📂 Upload Salary CSV", type=["csv"])
 
 if uploaded_file is None:
-    st.info("👆 Please upload a CSV file to continue.")
+    st.info("👆 Please upload a CSV file to continue")
     st.stop()
 
-# -------------------------------------------------
-# Load CSV
-# -------------------------------------------------
 df = pd.read_csv(uploaded_file)
 
 # -------------------------------------------------
-# Normalize column names (CRITICAL FIX)
+# Normalize column names
 # -------------------------------------------------
 df.columns = df.columns.str.strip().str.lower()
 
-# Fix known target column variations
-if "salarymorethen100k" in df.columns:
-    df = df.rename(columns={"salarymorethen100k": "salary_more_then_100k"})
-elif "salary_more_than_100k" in df.columns:
-    df = df.rename(columns={"salary_more_than_100k": "salary_more_then_100k"})
-
 # -------------------------------------------------
-# Validate required columns
+# Detect target column safely
 # -------------------------------------------------
-required_cols = {"company", "job", "degree", "salary_more_then_100k"}
+possible_targets = [
+    "salary_more_then_100k",
+    "salarymorethen100k",
+    "salary_more_then100k",
+    "salary_more_than_100k"
+]
 
-if not required_cols.issubset(df.columns):
-    st.error(f"❌ CSV must contain columns: {required_cols}")
+target_col = None
+for col in possible_targets:
+    if col in df.columns:
+        target_col = col
+        break
+
+if target_col is None:
+    st.error("❌ Could not find salary target column in CSV")
     st.write("Detected columns:", list(df.columns))
     st.stop()
 
 # -------------------------------------------------
-# Preview Data
+# Validate required feature columns
+# -------------------------------------------------
+required_features = {"company", "job", "degree"}
+if not required_features.issubset(df.columns):
+    st.error("❌ CSV must contain: company, job, degree")
+    st.write("Detected columns:", list(df.columns))
+    st.stop()
+
+# -------------------------------------------------
+# Dataset Preview
 # -------------------------------------------------
 st.subheader("📄 Dataset Preview")
 st.dataframe(df.head())
 
 # -------------------------------------------------
-# Charts
+# Charts (SAFE)
 # -------------------------------------------------
 st.subheader("📊 Data Insights")
 
@@ -67,7 +73,7 @@ with col1:
     fig1 = px.histogram(
         df,
         x="company",
-        color="salary_more_then_100k",
+        color=target_col,
         barmode="group",
         title="Company vs Salary Distribution"
     )
@@ -75,14 +81,14 @@ with col1:
 
 with col2:
     job_salary = (
-        df.groupby("job", as_index=False)["salary_more_then_100k"]
+        df.groupby("job", as_index=False)[target_col]
         .mean()
     )
 
     fig2 = px.bar(
         job_salary,
         x="job",
-        y="salary_more_then_100k",
+        y=target_col,
         title="Average Salary >100K by Job"
     )
     st.plotly_chart(fig2, use_container_width=True)
@@ -90,26 +96,26 @@ with col2:
 # -------------------------------------------------
 # Prepare Data for Model
 # -------------------------------------------------
-inputs = df.drop("salary_more_then_100k", axis=1)
-target = df["salary_more_then_100k"]
+X = df[["company", "job", "degree"]]
+y = df[target_col]
 
 le_company = LabelEncoder()
 le_job = LabelEncoder()
 le_degree = LabelEncoder()
 
-inputs["company_n"] = le_company.fit_transform(inputs["company"])
-inputs["job_n"] = le_job.fit_transform(inputs["job"])
-inputs["degree_n"] = le_degree.fit_transform(inputs["degree"])
+X["company_n"] = le_company.fit_transform(X["company"])
+X["job_n"] = le_job.fit_transform(X["job"])
+X["degree_n"] = le_degree.fit_transform(X["degree"])
 
-inputs_n = inputs.drop(["company", "job", "degree"], axis=1)
+X_encoded = X[["company_n", "job_n", "degree_n"]]
 
 # -------------------------------------------------
 # Train Model
 # -------------------------------------------------
 model = DecisionTreeClassifier()
-model.fit(inputs_n, target)
+model.fit(X_encoded, y)
 
-accuracy = model.score(inputs_n, target)
+accuracy = model.score(X_encoded, y)
 st.success(f"✅ Model Accuracy: {accuracy:.2f}")
 
 # -------------------------------------------------
@@ -121,14 +127,16 @@ company = st.selectbox("Company", sorted(df["company"].unique()))
 job = st.selectbox("Job Role", sorted(df["job"].unique()))
 degree = st.selectbox("Degree", sorted(df["degree"].unique()))
 
-company_n = le_company.transform([company])[0]
-job_n = le_job.transform([job])[0]
-degree_n = le_degree.transform([degree])[0]
+input_data = [[
+    le_company.transform([company])[0],
+    le_job.transform([job])[0],
+    le_degree.transform([degree])[0]
+]]
 
 if st.button("Predict Salary"):
-    prediction = model.predict([[company_n, job_n, degree_n]])
+    prediction = model.predict(input_data)[0]
 
-    if prediction[0] == 1:
+    if prediction == 1:
         st.success("💰 Salary is MORE than 100K")
     else:
         st.warning("💼 Salary is LESS than or equal to 100K")
