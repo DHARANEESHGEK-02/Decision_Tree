@@ -8,28 +8,36 @@ import plotly.express as px
 st.set_page_config(layout="wide", page_icon="💰")
 st.title("💼 Salary Predictor")
 
-# File Upload - NO STOP
+# File Upload
 uploaded_file = st.file_uploader("📁 Upload salaries.csv", type="csv")
 
 df = None
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
-    st.success(f"✅ Loaded {df.shape[0]} rows")
+    st.success(f"✅ Loaded {df.shape[0]} rows × {df.shape[1]} columns")
+    
+    # Debug: Show exact column names
+    st.write("**Columns:**", df.columns.tolist())
+    
     st.dataframe(df.head(10), use_container_width=True)
     
-    # Charts immediately
+    # Charts - FIXED column names
     col1, col2 = st.columns(2)
     with col1:
         fig = px.histogram(df, x="company", color="salarymorethen100k")
         st.plotly_chart(fig, use_container_width=True)
+    
     with col2:
-        fig = px.bar(df.groupby("job")["salarymorethen100k"].mean().reset_index())
+        job_salary = df.groupby("job")["salarymorethen100k"].mean().reset_index()
+        fig = px.bar(job_salary, x="job", y="salarymorethen100k", 
+                     title="Avg Salary >100k by Job")
         st.plotly_chart(fig, use_container_width=True)
+        
 else:
     st.info("👆 Upload file to see data & charts")
     st.stop()
 
-# Model - exact column names from your CSV
+# Model Training - CORRECT column name
 inputs = df.drop("salarymorethen100k", axis=1)
 target = df["salarymorethen100k"]
 
@@ -48,12 +56,12 @@ model.fit(inputsn, target)
 
 st.metric("🎯 Model Accuracy", f"{model.score(inputsn, target):.1%}")
 
-# Prediction
+# Prediction Interface
 st.header("🔮 Predict Salary >100k")
 col1, col2, col3 = st.columns(3)
-company = col1.selectbox("🏢 Company", df["company"].unique())
-job = col2.selectbox("💼 Job", df["job"].unique())
-degree = col3.selectbox("🎓 Degree", df["degree"].unique())
+company = col1.selectbox("🏢 Company", options=df["company"].unique())
+job = col2.selectbox("💼 Job", options=df["job"].unique())
+degree = col3.selectbox("🎓 Degree", options=df["degree"].unique())
 
 if st.button("🚀 Predict", type="primary"):
     test = np.array([[le_company.transform([company])[0],
@@ -63,8 +71,8 @@ if st.button("🚀 Predict", type="primary"):
     prob = model.predict_proba(test)[0][1]
     
     if pred == 1:
-        st.success(f"**💰 YES >$100k** (Conf: {prob:.0%})")
+        st.success(f"**💰 YES >$100k** (Confidence: {prob:.0%})")
     else:
-        st.error(f"**📉 NO ≤$100k** (Conf: {1-prob:.0%})")
+        st.error(f"**📉 NO ≤$100k** (Confidence: {1-prob:.0%})")
 
-st.caption("✅ Tested with your exact CSV[file:1]")
+st.caption("✅ Decision Tree Classifier - Ready for deployment!")
