@@ -20,18 +20,18 @@ if uploaded_file is not None:
     # Charts immediately
     col1, col2 = st.columns(2)
     with col1:
-        fig = px.histogram(df, x="company", color="salary_more_then_100k")
+        fig = px.histogram(df, x="company", color="salarymorethen100k")
         st.plotly_chart(fig, use_container_width=True)
     with col2:
-        fig = px.bar(df.groupby("job")["salary_more_then_100k"].mean().reset_index())
+        fig = px.bar(df.groupby("job")["salarymorethen100k"].mean().reset_index())
         st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("👆 Upload file to see data & charts")
     st.stop()
 
 # Model - exact column names from your CSV
-inputs = df.drop("salary_more_then_100k", axis=1)
-target = df["salary_more_then_100k"]
+inputs = df.drop("salarymorethen100k", axis=1)
+target = df["salarymorethen100k"]
 
 le_company = LabelEncoder()
 le_job = LabelEncoder()
